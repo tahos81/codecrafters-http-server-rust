@@ -38,10 +38,10 @@ fn handle_stream(mut stream: TcpStream) {
             if let Some((_method, path, _version)) = status_line.split(|a| a == &32).collect_tuple()
             {
                 let subpaths: Vec<&[u8]> = path.splitn(3, |ch| ch == &47).collect();
-                println!("{:?}", subpaths);
                 match subpaths[1] {
-                    &[] => root(stream),
-                    &[101, 99, 104, 111] => echo(stream, subpaths[2]),
+                    b"" => root(stream),
+                    b"echo" => echo(stream, subpaths[2]),
+                    b"user-agent" => user_agent(stream, request_lines),
                     _ => not_found(stream),
                 }
             } else {
@@ -68,6 +68,23 @@ fn echo(stream: TcpStream, arg: &[u8]) {
     ]
     .concat();
     write_response(stream, &echo_response);
+}
+
+fn user_agent(stream: TcpStream, request: Vec<&[u8]>) {
+    for header in request {
+        if header.starts_with(b"User-Agent") {
+            let agent = &header[12..];
+            let response = [
+                b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ",
+                agent.len().to_string().as_bytes(),
+                b"\r\n\r\n",
+                agent,
+            ]
+            .concat();
+            write_response(stream, &response);
+            return;
+        }
+    }
 }
 
 fn not_found(stream: TcpStream) {
