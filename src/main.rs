@@ -1,28 +1,24 @@
 use itertools::Itertools;
-use std::{
-    io::{Read, Write},
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
 };
 
-fn main() {
-    let listener = TcpListener::bind("127.0.0.1:4221").unwrap();
+#[tokio::main]
+async fn main() {
+    let listener = TcpListener::bind("127.0.0.1:4221").await.unwrap();
 
-    for stream in listener.incoming() {
-        match stream {
-            Ok(mut _stream) => {
-                println!("accepted new connection");
-                handle_stream(_stream)
-            }
-            Err(e) => {
-                println!("error: {}", e);
-            }
-        }
+    loop {
+        let (stream, _) = listener.accept().await.unwrap();
+        tokio::spawn(async move {
+            handle_stream(stream).await;
+        });
     }
 }
 
-fn handle_stream(mut stream: TcpStream) {
+async fn handle_stream(mut stream: TcpStream) {
     let mut buf = [0; 1024];
-    match stream.read(&mut buf) {
+    match stream.read(&mut buf).await {
         Ok(_) => {
             let request_lines: Vec<&[u8]> = buf
                 .split(|&b| b == b'\n')
@@ -39,10 +35,10 @@ fn handle_stream(mut stream: TcpStream) {
             {
                 let subpaths: Vec<&[u8]> = path.splitn(3, |ch| ch == &47).collect();
                 match subpaths[1] {
-                    b"" => root(stream),
-                    b"echo" => echo(stream, subpaths[2]),
-                    b"user-agent" => user_agent(stream, request_lines),
-                    _ => not_found(stream),
+                    b"" => root(stream).await,
+                    b"echo" => echo(stream, subpaths[2]).await,
+                    b"user-agent" => user_agent(stream, request_lines).await,
+                    _ => not_found(stream).await,
                 }
             } else {
                 eprintln!("error parsing");
@@ -54,12 +50,12 @@ fn handle_stream(mut stream: TcpStream) {
     }
 }
 
-fn root(stream: TcpStream) {
+async fn root(stream: TcpStream) {
     let ok_response = b"HTTP/1.1 200 OK\r\n\r\n";
-    write_response(stream, ok_response);
+    write_response(stream, ok_response).await;
 }
 
-fn echo(stream: TcpStream, arg: &[u8]) {
+async fn echo(stream: TcpStream, arg: &[u8]) {
     let echo_response = [
         b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ",
         arg.len().to_string().as_bytes(),
@@ -67,10 +63,10 @@ fn echo(stream: TcpStream, arg: &[u8]) {
         arg,
     ]
     .concat();
-    write_response(stream, &echo_response);
+    write_response(stream, &echo_response).await;
 }
 
-fn user_agent(stream: TcpStream, request: Vec<&[u8]>) {
+async fn user_agent(stream: TcpStream, request: Vec<&[u8]>) {
     for header in request {
         if header.starts_with(b"User-Agent") {
             let agent = &header[12..];
@@ -81,18 +77,18 @@ fn user_agent(stream: TcpStream, request: Vec<&[u8]>) {
                 agent,
             ]
             .concat();
-            write_response(stream, &response);
+            write_response(stream, &response).await;
             return;
         }
     }
 }
 
-fn not_found(stream: TcpStream) {
+async fn not_found(stream: TcpStream) {
     let not_found_response = b"HTTP/1.1 404 Not Found\r\n\r\n";
-    write_response(stream, not_found_response);
+    write_response(stream, not_found_response).await;
 }
 
-fn write_response(mut stream: TcpStream, response: &[u8]) {
-    stream.write(response).unwrap();
-    stream.flush().unwrap();
+async fn write_response(mut stream: TcpStream, response: &[u8]) {
+    stream.write(response).await.unwrap();
+    stream.flush().await.unwrap();
 }
